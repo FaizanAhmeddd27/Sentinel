@@ -1,0 +1,124 @@
+version: "3.9"
+
+services:
+  # Redis — Message Broker & Cache
+  redis:
+    image: redis:7-alpine
+    container_name: sentinel-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sentinel-network
+
+  # FastAPI Application
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sentinel-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+    volumes:
+      - ./logs:/app/logs
+      - ./app:/app/app  # Hot reload in dev
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --log-level info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - sentinel-network
+
+  # Celery Worker — Async Task Processing
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: sentinel-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+    volumes:
+      - ./logs:/app/logs
+      - ./app:/app/app
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - sentinel-network
+
+  # Celery Beat — Scheduled Tasks 
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: sentinel-beat
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+    command: celery -A app.celery_app.celery_app beat --loglevel=info
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - sentinel-network
+
+  # Flower — Celery Monitoring UI
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: sentinel-flower
+    restart: unless-stopped
+    ports:
+      - "5555:5555"
+    env_file:
+      - .env
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    command: celery -A app.celery_app.celery_app flower --port=5555
+    depends_on:
+      - redis
+    networks:
+      - sentinel-network
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  sentinel-network:
+    driver: bridge
