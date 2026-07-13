@@ -10,7 +10,6 @@
 ![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 ![Groq](https://img.shields.io/badge/Groq-LLaMA%203.3-FF6B35?style=for-the-badge)
 
-**Built for UBL (United Bank Limited) Fintech Hackathon**
 
 *Observe → Detect → Predict → Recommend → Resolve*
 
